@@ -173,7 +173,9 @@ async def update_profile_photo(client):
 
                 photos = await client.get_profile_photos('me')
                 if photos.total > 0:
-                    await client(DeletePhotosRequest([InputPhoto(id=photos[0].id, access_hash=photos[0].access_hash, file_reference=photos[0].file_reference)]))
+                    input_photos = [p.as_input_photo() for p in photos]  # convert all to InputPhoto
+                    await client(DeletePhotosRequest(input_photos))
+
 
                 with open('pic/profile_modified.jpg', 'rb') as f:
                     uploaded_file = await client.upload_file(f)
