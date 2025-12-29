@@ -5,11 +5,83 @@ import datetime
 from math import ceil
 import pytz
 import logging
+import json
+import random
+import asyncio
+from pathlib import Path
 
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s [%(levelname)s] %(message)s'
 )
+
+BASE = Path("save")
+CURSE_FILE = BASE / "curse.txt"
+NICE_FILE = BASE / "nice.txt"
+ENEMY_FILE = BASE / "enemy.json"
+FRIEND_FILE = BASE / "friend.json"
+
+for f in [CURSE_FILE, NICE_FILE]:
+    f.touch(exist_ok=True)
+
+for f in [ENEMY_FILE, FRIEND_FILE]:
+    if not f.exists():
+        f.write_text(json.dumps([]))
+
+def load_words(file):
+    return [w.strip() for w in file.read_text(encoding="utf-8").splitlines() if w.strip()]
+
+async def delenemy(event):
+    if not event.is_reply:
+        await event.reply("❌ Reply to a user to remove from enemies.")
+        return
+
+    reply = await event.get_reply_message()
+    uid = reply.sender_id
+
+    if uid in enemy:
+        enemy.remove(uid)
+        save_enemy(enemy)
+        await event.reply("✅ Enemy removed.")
+    else:
+        await event.reply("ℹ️ User not in enemy list.")
+
+
+async def delfriend(event):
+    if not event.is_reply:
+        await event.reply("❌ Reply to a user to remove from friends.")
+        return
+
+    reply = await event.get_reply_message()
+    uid = reply.sender_id
+
+    if uid in friend:
+        friend.remove(uid)
+        save_friend(friend)
+        await event.reply("✅ Friend removed.")
+    else:
+        await event.reply("ℹ️ User not in friend list.")
+
+
+
+def add_words(file, words):
+    existing = set(load_words(file))
+    with file.open("a", encoding="utf-8") as f:
+        for w in words:
+            if w not in existing:
+                f.write(w + "\n")
+
+def del_word(file, word):
+    words = load_words(file)
+    words = [w for w in words if w != word]
+    file.write_text("\n".join(words), encoding="utf-8")
+
+
+def load_users(file):
+    return set(json.loads(file.read_text()))
+
+def save_users(file, users):
+    file.write_text(json.dumps(list(users)))
 
 
 async def send_welcome_message():
@@ -25,6 +97,81 @@ async def send_welcome_message():
     await client.send_message(admin_user_id, f'Hi {admin_first_name}!\nWelcome to the TRself bot.\n**Dev: @TRself **\n{helptxt}')
 
 pic_folder = 'pic/'
+
+@client.on(events.NewMessage(pattern=r'^/addcurse (.+)'))
+async def add_curse(event):
+    words = event.pattern_match.group(1).split(",")
+    add_words(CURSE_FILE, [w.strip() for w in words])
+    await event.reply("✅ Curse words added")
+
+@client.on(events.NewMessage(pattern=r'^/delcurse (.+)'))
+async def del_curse(event):
+    del_word(CURSE_FILE, event.pattern_match.group(1).strip())
+    await event.reply("🗑 Curse word removed")
+
+@client.on(events.NewMessage(pattern=r'^/delnice (.+)'))
+async def del_nice(event):
+    del_word(NICE_FILE, event.pattern_match.group(1).strip())
+    await event.reply("🗑 Nice word removed")
+
+@client.on(events.NewMessage(pattern=r'^/curselist$'))
+async def curse_list(event):
+    await event.reply("\n".join(load_words(CURSE_FILE)) or "Empty")
+
+@client.on(events.NewMessage(pattern=r'^/nicelist$'))
+async def nice_list(event):
+    await event.reply("\n".join(load_words(NICE_FILE)) or "Empty")
+
+@client.on(events.NewMessage(pattern=r'^/setenemy$'))
+async def set_enemy(event):
+    if not event.is_reply:
+        return
+    reply = await event.get_reply_message()
+    users = load_users(ENEMY_FILE)
+    users.add(reply.sender_id)
+    save_users(ENEMY_FILE, users)
+    await event.reply("😈 Enemy set")
+
+@client.on(events.NewMessage(pattern=r'^/setfriend$'))
+async def set_friend(event):
+    if not event.is_reply:
+        return
+    reply = await event.get_reply_message()
+    users = load_users(FRIEND_FILE)
+    users.add(reply.sender_id)
+    save_users(FRIEND_FILE, users)
+    await event.reply("😊 Friend set")
+
+@client.on(events.NewMessage(incoming=True))
+async def auto_reply_enemy_friend(event):
+    if event.out:
+        return
+
+    sender = event.sender_id
+    enemies = load_users(ENEMY_FILE)
+    friends = load_users(FRIEND_FILE)
+
+    if sender in enemies:
+        words = load_words(CURSE_FILE)
+    elif sender in friends:
+        words = load_words(NICE_FILE)
+    else:
+        return
+
+    if not words:
+        return
+
+    await asyncio.sleep(random.randint(4, 6))
+    await event.reply(random.choice(words))
+
+
+
+@client.on(events.NewMessage(pattern=r'^/addnice (.+)'))
+async def add_nice(event):
+    words = event.pattern_match.group(1).split(",")
+    add_words(NICE_FILE, [w.strip() for w in words])
+    await event.reply("✅ Nice words added")
+
 
 def set_user_bio(bio):
     with open('settings/bio.txt', 'w') as f:
@@ -116,52 +263,66 @@ MSAVE_DIRECTORY = 'music'
 
 async def sc(event):
     if event.sender_id == admin_user_id:
-        query = event.raw_text[7:]  # Adjust the index to match '/gmusic '
+        query = event.raw_text[7:]  # /gmusic 
         results = sp.search(q=query, type='track')
         tracks = results.get('tracks', {}).get('items', [])
-        
-        if tracks:
-            track = tracks[0]
-            title = track.get('name', '')
-            artist = track.get('artists', [{}])[0].get('name', '')
-            url = track.get('external_urls', {}).get('spotify', '')
-            views = track.get('popularity', '')
-            release_date = track.get('album', {}).get('release_date', '')
-            
-            await event.delete()
-            await download_and_send(track, event, title, artist, views, release_date, url)
-        else:
-            await event.edit(f'**❈Sorry, no results found.**')
+
+        if not tracks:
+            await event.edit("**❈Sorry, no results found.**")
+            return
+
+        track = tracks[0]
+        title = track.get('name', '')
+        artist = track.get('artists', [{}])[0].get('name', '')
+        url = track.get('external_urls', {}).get('spotify', '')
+        views = track.get('popularity', '')
+        release_date = track.get('album', {}).get('release_date', '')
+
+        await event.delete()
+        await download_and_send(track, event, title, artist, views, release_date, url)
+
 
 async def download_and_send(track, event, title, artist, views, release_date, url):
     try:
         audio_url = track.get('preview_url')
-        
-        if audio_url:
-            audio_file_path = os.path.join(MSAVE_DIRECTORY, f'{title}.mp3')
-            async with aiohttp.ClientSession() as session:
-                async with session.get(audio_url) as resp:
-                    if resp.status == 200:
-                        with open(audio_file_path, 'wb') as file:
-                            while True:
-                                chunk = await resp.content.read(1024)
-                                if not chunk:
-                                    break
-                                file.write(chunk)
-                        
-                        await event.reply(
-                            file=audio_file_path,
-                            message=f"**❈Title: {title}\nArtist: {artist}\nViews: {views} K\nRelease Date: {release_date}\n[Listen on Spotify]({url})**",
-                        )
-                        
-                        os.remove(audio_file_path)
-                    else:
-                        await event.reply(f"Failed to download: Status {resp.status}")
-        else:
-            await event.reply(f"No audio preview available.")
-    
+
+        if not audio_url:
+            await event.reply("No audio preview available.")
+            return
+
+        audio_file_path = os.path.join(MSAVE_DIRECTORY, f'{title}.mp3')
+
+        async with aiohttp.ClientSession() as session:
+            async with session.get(audio_url) as resp:
+                if resp.status != 200:
+                    await event.reply(f"Failed to download: Status {resp.status}")
+                    return
+
+                with open(audio_file_path, 'wb') as file:
+                    while True:
+                        chunk = await resp.content.read(1024)
+                        if not chunk:
+                            break
+                        file.write(chunk)
+
+        await event.reply(
+            file=audio_file_path,
+            message=(
+                f"**❈Title: {title}\n"
+                f"Artist: {artist}\n"
+                f"Views: {views} K\n"
+                f"Release Date: {release_date}\n"
+                f"[Listen on Spotify]({url})**"
+            ),
+        )
+
+        os.remove(audio_file_path)
+
     except Exception as e:
         await event.reply(f"Failed: {str(e)}")
+
+
+
 
 
 async def tarikh(event):

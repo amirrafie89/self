@@ -1,3 +1,34 @@
+
+import logging, sys
+
+class Pretty(logging.Formatter):
+    COLORS = {
+        "INFO": "\033[92m",
+        "WARNING": "\033[93m",
+        "ERROR": "\033[91m",
+        "DEBUG": "\033[94m"
+    }
+    EMOJI = {
+        "INFO": "✅",
+        "WARNING": "⚠️",
+        "ERROR": "❌",
+        "DEBUG": "🐞"
+    }
+    RESET = "\033[0m"
+
+    def format(self, record):
+        c = self.COLORS.get(record.levelname, "")
+        e = self.EMOJI.get(record.levelname, "ℹ️")
+        return f"{c}{e} [{record.levelname}] {record.getMessage()}{self.RESET}"
+
+handler = logging.StreamHandler(sys.stdout)
+handler.setFormatter(Pretty())
+root = logging.getLogger()
+root.handlers.clear()
+root.addHandler(handler)
+root.setLevel(logging.INFO)
+logging.getLogger("telethon").setLevel(logging.WARNING)
+
 #coded by @CheBedoonamValla in Telegram
 from lib import *
 from lib.updater import update_last_name, update_about, update_first_name, update_profile_photo
